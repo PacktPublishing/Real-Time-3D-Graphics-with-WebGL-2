@@ -1,0 +1,242 @@
+<html>
+
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Light.js"></script>
+  <script type="text/javascript" src="/common/js/Texture.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    uniform bool uUseVertexColor;
+    uniform vec4 uMaterialDiffuse;
+    uniform vec4 uMaterialAmbient;
+    uniform float uAlpha;
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec3 uLightPosition;
+    uniform vec4 uLightAmbient;
+    uniform vec4 uLightDiffuse;
+    uniform bool uUseLambert;
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+    in vec4 aVertexColor;
+
+    out vec4 vColor;
+
+    void main(void) {
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      float lambertTerm = 1.0;
+
+      if (uUseLambert) {
+        vec3 normal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+        vec3 lightDirection = normalize(-uLightPosition);
+        lambertTerm = max(dot(normal, -lightDirection), 0.20);
+      }
+
+      vec4 Ia = uLightAmbient * uMaterialAmbient;
+      vec4 Id = vec4(0.0);
+
+      if (uUseVertexColor) {
+        Id = uLightDiffuse * aVertexColor * lambertTerm;
+      }
+      else {
+        Id = uLightDiffuse * uMaterialDiffuse * lambertTerm;
+      }
+
+      vColor = vec4(vec3(Ia + Id), uAlpha);
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uWireframe;
+
+    in vec4 vColor;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      fragColor = vColor;
+    }
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    let gl, scene, program, camera, transforms, clock,
+      useVertexColors = false;
+
+    function configure() {
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(100);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LESS);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexColor'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uLightAmbient',
+        'uLightDiffuse',
+        'uLightPosition',
+        'uWireframe',
+        'uAlpha',
+        'uUseVertexColor',
+        'uUseLambert'
+      ];
+
+      program.load(attributes, uniforms);
+
+      clock = new Clock();
+
+      scene = new Scene(gl, program);
+
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 0, 4]);
+      camera.setFocus([0, 0, 0]);
+      camera.setAzimuth(45);
+      camera.setElevation(-30);
+      new Controls(camera, canvas);
+
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      gl.uniform3fv(program.uLightPosition, [0, 5, 20]);
+      gl.uniform3fv(program.uLightAmbient, [1, 1, 1, 1]);
+      gl.uniform4fv(program.uLightDiffuse, [1, 1, 1, 1]);
+      gl.uniform1f(program.uAlpha, 1.0);
+      gl.uniform1i(program.uUseVertexColor, useVertexColors);
+      gl.uniform1i(program.uUseLambert, true);
+    }
+
+    function load() {
+      scene.load('/common/models/geometries/cube-texture.json');
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        scene.traverse(object => {
+          if (object.hidden) return;
+
+          transforms.calculateModelView();
+          transforms.push();
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+          gl.uniform1i(program.uWireframe, object.wireframe);
+          gl.uniform1i(program.uUseVertexColor, useVertexColors);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Draw
+          if (object.wireframe) {
+            gl.drawElements(gl.LINES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+          else {
+            gl.enable(gl.CULL_FACE);
+            gl.cullFace(gl.FRONT);
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+            gl.cullFace(gl.BACK);
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+            gl.disable(gl.CULL_FACE);
+          }
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', draw);
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      utils.configureControls({
+        'Use Lambert Term': {
+          value: true,
+          onChange: v => gl.uniform1i(program.uUseLambert, v)
+        },
+        'Use Per Vertex': {
+          value: useVertexColors,
+          onChange: v => useVertexColors = v
+        },
+        'Alpha Value': {
+          value: 1,
+          min: 0, max: 1, step: 0.1,
+          onChange: v => gl.uniform1f(program.uAlpha, v)
+        }
+      });
+    }
+
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

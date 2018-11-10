@@ -1,0 +1,384 @@
+<html>
+
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec4 uMaterialDiffuse;
+    uniform vec3 uPositionLight;
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+
+    out vec3 vNormal;
+    out vec3 vLightRay;
+    out vec4 vFinalColor;
+
+    void main(void) {
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      vNormal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+      vec4 positionLight = vec4(uPositionLight, 1.0);
+      vLightRay = vertex.xyz - positionLight.xyz;
+      vFinalColor = uMaterialDiffuse;
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+
+
+
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform bool uWireframe;
+    uniform vec4 uLightAmbient;
+    uniform vec4 uLightDiffuse;
+    uniform vec4 uMaterialAmbient;
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uUseLambert;
+
+    in vec3 vNormal;
+    in vec3 vLightRay;
+    in vec4 vFinalColor;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      if (uWireframe) {
+        fragColor = vFinalColor;
+      }
+      else {
+        vec3 L = normalize(vLightRay);
+        vec3 N = normalize(vNormal);
+        float lambertTerm	= clamp(dot(N, -L), 0.0, 1.0);
+        vec4 Ia = uLightAmbient * uMaterialAmbient;
+        vec4 Id = uLightDiffuse * uMaterialDiffuse;
+        if (uUseLambert) {
+          Id = Id * lambertTerm;
+        }
+        fragColor = vec4(Ia.rgb + Id.rgb, uMaterialDiffuse.a);
+      }
+    }
+
+
+
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    let
+      gl, scene, program, camera, transforms, clock,
+      blendingEquation,
+      blendingSource,
+      blendingTarget,
+      blending = true,
+      depthTest = true,
+      culling = true,
+      lambert = true,
+      floor = true,
+      coneColor = [0, 1, 1, 1],
+      sphereColor = [0.7, 0, .7, 1],
+      blendingColor = [0, 1, 0],
+      blendingAlpha = 1;
+
+    function configure() {
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LESS);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.blendColor(...blendingColor.concat(blendingAlpha));
+      gl.enable(gl.CULL_FACE);
+
+      // Set values
+      blendingEquation = gl.FUNC_ADD;
+      blendingSource = gl.SRC_ALPHA;
+      blendingTarget = gl.ONE_MINUS_SRC_ALPHA;
+
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uLightAmbient',
+        'uLightDiffuse',
+        'uLightPosition',
+        'uWireframe',
+        'uUseLambert'
+      ];
+
+      program.load(attributes, uniforms);
+
+      clock = new Clock();
+
+      scene = new Scene(gl, program);
+
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 5, 35]);
+      camera.setFocus([0, 0, 0]);
+      camera.setAzimuth(25);
+      camera.setElevation(-25);
+      new Controls(camera, canvas);
+
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      gl.uniform3fv(program.uLightPosition, [0, 5, 20]);
+      gl.uniform4fv(program.uLightAmbient, [1, 1, 1, 1]);
+      gl.uniform4fv(program.uLightDiffuse, [1, 1, 1, 1]);
+      gl.uniform1i(program.uUseLambert, lambert);
+    }
+
+    function load() {
+      scene.add(new Floor(80, 2));
+      scene.load('/common/models/geometries/cone3.json', 'cone', { diffuse: coneColor });
+      scene.load('/common/models/geometries/sphere2.json', 'sphere', { diffuse: sphereColor });
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        scene.traverse(object => {
+          const { alias } = object;
+
+          if (alias === 'floor' && !floor) return;
+
+          transforms.calculateModelView();
+          transforms.push();
+
+          if (alias === 'cone') {
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, [0, 0, -3.5]);
+          }
+
+          if (alias === 'sphere') {
+            mat4.scale(transforms.modelViewMatrix, transforms.modelViewMatrix, [0.5, 0.5, 0.5]);
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, [0, 0, 2.5]);
+          }
+
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+          gl.uniform1i(program.uWireframe, object.wireframe);
+          gl.uniform1i(program.uUseLambert, lambert);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Draw
+          if (object.wireframe) {
+            gl.drawElements(gl.LINES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+          else {
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', draw);
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      const blendFuncs = [
+        'ZERO',
+        'ONE',
+        'SRC_COLOR',
+        'DST_COLOR',
+        'SRC_ALPHA',
+        'DST_ALPHA',
+        'CONSTANT_COLOR',
+        'CONSTANT_ALPHA',
+        'ONE_MINUS_SRC_ALPHA',
+        'ONE_MINUS_DST_ALPHA',
+        'ONE_MINUS_SRC_COLOR',
+        'ONE_MINUS_DST_COLOR',
+        'ONE_MINUS_CONSTANT_COLOR',
+        'ONE_MINUS_CONSTANT_ALPHA'
+      ];
+
+      const getState = v => v ? 'enable' : 'disable';
+
+      function updateBlending(value = true) {
+        gl[value ? 'enable' : 'disable'](gl.BLEND);
+        gl.blendFunc(blendingSource, blendingTarget);
+        gl.blendEquation(blendingEquation);
+        gl.blendColor(...blendingColor.concat(blendingAlpha));
+      }
+
+      utils.configureControls({
+        Blending: {
+          value: blending,
+          onChange: updateBlending
+        },
+        'Depth Testing': {
+          value: depthTest,
+          onChange: v => gl[getState(v)](gl.DEPTH_TEST)
+        },
+        'Back Face Culling': {
+          value: culling,
+          onChange: v => gl[getState(v)](gl.CULL_FACE)
+        },
+        Lambert: {
+          value: lambert,
+          onChange: v => lambert = v
+        },
+        Floor: {
+          value: floor,
+          onChange: v => floor = v
+        },
+        ...[
+          { name: 'Sphere', id: 'sphere', color: sphereColor },
+          { name: 'Cone', id: 'cone', color: coneColor }
+        ].reduce((result, data) => {
+          result = {
+            ...result,
+            [`${data.name} Alpha`]: {
+              value: 1,
+              min: 0, max: 1, step: 0.1,
+              onChange: v => scene.get(data.id).diffuse[3] = v
+            },
+            [`${data.name} Color`]: {
+              value: utils.denormalizeColor(data.color),
+              onChange: v => scene.get(data.id).diffuse = utils.normalizeColor(v)
+            }
+          };
+          return result;
+        }, {}),
+        'Blend Function': {
+          value: blendingEquation,
+          options: ['FUNC_ADD', 'FUNC_SUBTRACT', 'FUNC_REVERSE_SUBTRACT'],
+          onChange: v => {
+            blendingEquation = gl[v];
+            updateBlending();
+          }
+        },
+        Source: {
+          value: blendingSource,
+          options: [...blendFuncs, 'SRC_ALPHA_SATURATE'],
+          onChange: v => {
+            blendingSource = gl[v];
+            updateBlending();
+          }
+        },
+        Destination: {
+          value: blendingTarget,
+          options: blendFuncs,
+          onChange: v => {
+            blendingTarget = gl[v];
+            updateBlending();
+          }
+        },
+        'Blending Color': {
+          value: [0, 0, 0],
+          onChange: v => {
+            blendingColor = utils.normalizeColor(v);
+            updateBlending();
+          }
+        },
+        'Alpha Value': {
+          value: 1,
+          min: 0, max: 1, step: 0.1,
+          onChange: v => {
+            blendingAlpha = v;
+            updateBlending();
+          }
+        },
+        'Render Order': {
+          value: 'Cone First',
+          options: ['Cone First', 'Sphere First'],
+          onChange: v => {
+            if (v === 'Sphere First') {
+              scene.renderSooner('sphere');
+              scene.renderFirst('floor');
+            }
+            else {
+              scene.renderSooner('cone');
+              scene.renderFirst('floor');
+            }
+          }
+        },
+        Reset: () => {
+          depthTest = true;
+          blending = true;
+          culling = true;
+          lambert = true;
+          floor = true;
+          blendingEquation = gl.FUNC_ADD;
+          blendingSource = gl.SRC_ALPHA;
+          blendingTarget = gl.ONE_MINUS_SRC_ALPHA;
+          camera.goHome([0, 5, 35]);
+          camera.setFocus([0, 0, 0]);
+          camera.setAzimuth(25);
+          camera.setElevation(-25);
+        }
+      });
+    }
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

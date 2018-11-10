@@ -1,0 +1,241 @@
+<html>
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Light.js"></script>
+  <script type="text/javascript" src="/common/js/Picker.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/PostProcess.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Texture.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec3 uLightPosition;
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+    in vec3 aVertexTangent;
+    in vec4 aVertexColor;
+    in vec2 aVertexTextureCoords;
+
+    out vec2 vTextureCoords;
+    out vec3 vTangentLightDirection;
+    out vec3 vTangentEyeDirection;
+
+    void main(void) {
+      // Transformed vertex position
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+
+      // Transformed normal position
+      vec3 normal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+      vec3 tangent = vec3(uNormalMatrix * vec4(aVertexTangent, 1.0));
+      vec3 bitangent = cross(normal, tangent);
+
+      mat3 tbnMatrix = mat3(
+        tangent.x, bitangent.x, normal.x,
+        tangent.y, bitangent.y, normal.y,
+        tangent.z, bitangent.z, normal.z
+      );
+
+      // Eye direction, from camera position to vertex
+      vec3 eyeDirection = -vertex.xyz;
+
+      // Light direction, from light position to vertex
+      vec3 lightDirection = uLightPosition - vertex.xyz;
+      vTangentEyeDirection = eyeDirection * tbnMatrix;
+
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      vTextureCoords = aVertexTextureCoords;
+      vTangentLightDirection = lightDirection * tbnMatrix;
+    }
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform vec4 uMaterialDiffuse;
+    uniform vec4 uMaterialAmbient;
+    uniform vec4 uLightAmbient;
+    uniform vec4 uLightDiffuse;
+    uniform sampler2D uSampler;
+    uniform sampler2D uNormalSampler;
+
+    in vec4 vColor;
+    in vec2 vTextureCoords;
+    in vec3 vTangentLightDirection;
+    in vec3 vTangentEyeDirection;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      // Unpack tangent-space normal from texture
+      vec3 normal = normalize(2.0 * (texture(uNormalSampler, vTextureCoords).rgb - 0.5));
+
+      // Normalize the light direction and determine how much light is hitting this point
+      vec3 lightDirection = normalize(vTangentLightDirection);
+      float lambertTerm = max(dot(normal, lightDirection), 0.20);
+
+      // Calculate Specular level
+      vec3 eyeDirection = normalize(vTangentEyeDirection);
+      vec3 reflectDir = reflect(-lightDirection, normal);
+      float Is = pow(clamp(dot(reflectDir, eyeDirection), 0.0, 1.0), 8.0);
+
+      // Combine lighting and material colors
+      vec4 Ia = uLightAmbient * uMaterialAmbient;
+      vec4 Id = uLightDiffuse * uMaterialDiffuse * texture(uSampler, vTextureCoords) * lambertTerm;
+
+      fragColor = Ia + Id + Is;
+    }
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    let gl, scene, camera, clock, program, transforms, texture, texture2;
+
+    function configure() {
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(100);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LESS);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexTangent',
+        'aVertexColor',
+        'aVertexTextureCoords'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uLightAmbient',
+        'uLightDiffuse',
+        'uLightPosition',
+        'uSampler',
+        'uNormalSampler'
+      ];
+
+      program.load(attributes, uniforms);
+
+      clock = new Clock();
+      scene = new Scene(gl, program);
+
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 0, 2]);
+      camera.setFocus([0, 0, 0]);
+      camera.setAzimuth(40);
+      camera.setElevation(-30);
+      new Controls(camera, canvas);
+
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      gl.uniform3fv(program.uLightPosition, [0, 5, 20]);
+      gl.uniform4fv(program.uLightAmbient, [1, 1, 1, 1]);
+      gl.uniform4fv(program.uLightDiffuse, [1, 1, 1, 1]);
+
+      // Create textures
+      texture = new Texture(gl, '/common/images/fieldstone.jpg');
+      texture2 = new Texture(gl, '/common/images/fieldstone-normal.jpg');
+    }
+
+    function load() {
+      scene.load('/common/models/geometries/cube-texture.json');
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        scene.traverse(object => {
+          if (object.hidden) return;
+
+          transforms.calculateModelView();
+          transforms.push();
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Activate textures
+          if (object.textureCoords) {
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texture.glTexture);
+            gl.uniform1i(program.uSampler, 0);
+
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texture2.glTexture);
+            gl.uniform1i(program.uNormalSampler, 1);
+          }
+
+          // Draw
+          gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', draw);
+    }
+
+    window.onload = init;
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

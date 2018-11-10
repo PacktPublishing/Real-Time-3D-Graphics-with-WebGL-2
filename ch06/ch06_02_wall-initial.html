@@ -1,0 +1,313 @@
+<html>
+
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Light.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec4 uMaterialDiffuse;
+    uniform vec3 uPositionRedLight;
+    uniform vec3 uPositionGreenLight;
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+    in vec4 aVertexColor;
+
+    out vec3 vNormal;
+    out vec3 vRedRay;
+    out vec3 vGreenRay;
+
+    void main(void) {
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      vNormal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+
+      vec4 redLightPosition = uModelViewMatrix * vec4(uPositionRedLight, 1.0);
+      vec4 greenLightPosition = uModelViewMatrix * vec4(uPositionGreenLight, 1.0);
+
+      vRedRay = vertex.xyz - redLightPosition.xyz;
+      vGreenRay = vertex.xyz - greenLightPosition.xyz;
+
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform vec4 uMaterialAmbient;
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uWireframe;
+    uniform bool uLightSource;
+    uniform vec4 uLightAmbient;
+    uniform vec4 uDiffuseRedLight;
+    uniform vec4 uDiffuseGreenLight;
+    uniform float uCutOff;
+
+    in vec3 vNormal;
+    in vec3 vRedRay;
+    in vec3 vGreenRay;
+    in vec4 vFinalColor;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      if (uWireframe || uLightSource){
+        fragColor = uMaterialDiffuse;
+      }
+      else {
+        vec4 Ia = uLightAmbient * uMaterialAmbient;
+        vec4 Id1 = vec4(0.0, 0.0, 0.0, 1.0);
+        vec4 Id2 = vec4(0.0, 0.0, 0.0, 1.0);
+
+        vec3 N = normalize(vNormal);
+
+        float lambertTermOne = dot(N, -normalize(vRedRay));
+        float lambertTermTwo = dot(N, -normalize(vGreenRay));
+
+        if (lambertTermOne > uCutOff) {
+          Id1 = uDiffuseRedLight * uMaterialDiffuse * lambertTermOne;
+        }
+
+        if (lambertTermTwo > uCutOff) {
+          Id2 = uDiffuseGreenLight * uMaterialDiffuse * lambertTermTwo;
+        }
+
+        fragColor = vec4(vec3(Ia + Id1 + Id2), 1.0);
+      }
+    }
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    let gl, scene, program, camera, transforms, clock,
+      lightCutOff = 0.5,
+      redLightPosition = [0, 7, 3],
+      greenLightPosition = [2.5, 3, 3];
+
+    function configure() {
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.FUNC_ADD);
+      gl.depthFunc(gl.LEQUAL);
+
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexColor'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uLightAmbient',
+        'uDiffuseRedLight',
+        'uDiffuseGreenLight',
+        'uPositionRedLight',
+        'uPositionGreenLight',
+        'uWireframe',
+        'uLightSource',
+        'uCutOff'
+      ];
+
+      program.load(attributes, uniforms);
+
+      clock = new Clock();
+
+      scene = new Scene(gl, program);
+
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 5, 30]);
+      camera.setFocus([0, 0, 0]);
+      camera.setAzimuth(0);
+      camera.setElevation(-3);
+      new Controls(camera, canvas);
+
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      const redLight = new Light('redLight');
+      redLight.setPosition(redLightPosition);
+      redLight.setDiffuse([1, 0, 0, 1]);
+
+      const greenLight = new Light('greenLight');
+      greenLight.setPosition(greenLightPosition);
+      greenLight.setDiffuse([0, 1, 0, 1]);
+
+      gl.uniform3fv(program.uPositionRedLight, redLight.position);
+      gl.uniform3fv(program.uPositionGreenLight, greenLight.position);
+
+      gl.uniform4fv(program.uDiffuseRedLight, redLight.diffuse);
+      gl.uniform4fv(program.uDiffuseGreenLight, greenLight.diffuse);
+
+      gl.uniform1f(program.uCutOff, lightCutOff);
+      gl.uniform4fv(program.uLightAmbient, [1, 1, 1, 1]);
+    }
+
+    function load() {
+      scene.add(new Floor(80, 2));
+      scene.load('/common/models/geometries/wall.json', 'wall');
+      scene.load('/common/models/geometries/sphere3.json', 'redLight');
+      scene.load('/common/models/geometries/sphere3.json', 'greenLight');
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        scene.traverse(object => {
+          transforms.calculateModelView();
+          transforms.push();
+
+          gl.uniform1i(program.uLightSource, false);
+
+          const { alias } = object;
+          if (alias === 'redLight') {
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, program.getUniform(program.uPositionRedLight));
+            object.diffuse = program.getUniform(program.uDiffuseRedLight);
+            gl.uniform1i(program.uLightSource, true);
+          }
+
+          if (alias === 'greenLight') {
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, program.getUniform(program.uPositionGreenLight));
+            object.diffuse = program.getUniform(program.uDiffuseGreenLight);
+            gl.uniform1i(program.uLightSource, true);
+          }
+
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+          gl.uniform1i(program.uWireframe, object.wireframe);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Draw
+          if (object.wireframe) {
+            gl.drawElements(gl.LINES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+          else {
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', draw);
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      utils.configureControls({
+        'Camera Type': {
+          value: camera.type,
+          options: [Camera.TRACKING_TYPE, Camera.ORBITING_TYPE],
+          onChange: v => {
+            camera.goHome();
+            camera.setType(v);
+          }
+        },
+        ...[
+          {
+            name: 'Red Light',
+            position: redLightPosition,
+            uniform: program.uPositionRedLight
+          },
+          {
+            name: 'Green Light',
+            position: greenLightPosition,
+            uniform: program.uPositionGreenLight
+          },
+        ].reduce((controls, light) => {
+          const positionKeys = [
+            `X - ${light.name}`,
+            `Y - ${light.name}`,
+            `Z - ${light.name}`
+          ];
+          controls[light.name] = positionKeys.reduce((positionControls, position, i) => {
+            positionControls[position] = {
+              value: light.position[i],
+              min: -15, max: 15, step: 0.1,
+              onChange: (v, state) => {
+                gl.uniform3fv(light.uniform, positionKeys.map(p => state[p]));
+              }
+            };
+            return positionControls;
+          }, {});
+          return controls;
+        }, {}),
+        'Light Cone Cut Off': {
+          value: lightCutOff,
+          min: 0, max: 1, step: 0.01,
+          onChange: v => gl.uniform1f(program.uCutOff, v)
+        },
+        'Go Home': () => {
+          camera.goHome();
+          camera.setType(Camera.ORBITING_TYPE);
+        }
+      });
+    }
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

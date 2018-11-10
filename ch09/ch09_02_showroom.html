@@ -1,0 +1,377 @@
+<html>
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Light.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Texture.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    const int numLights = 4;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec3 uLightPosition[numLights];
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+
+    out vec3 vNormal;
+    out vec3 vLightRay[numLights];
+    out vec3 vEye[numLights];
+
+    void main(void) {
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      vec4 lightPosition = vec4(0.0);
+
+      // Set varyings for each individual light
+      for(int i= 0; i < numLights; i++) {
+        lightPosition = vec4(uLightPosition[i], 1.0);
+        vLightRay[i] = vertex.xyz - lightPosition.xyz;
+        vEye[i] = -vec3(vertex.xyz);
+      }
+
+      vNormal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    const int numLights = 4;
+
+    uniform vec3 uLd[numLights];
+    uniform vec3 uLs[numLights];
+    uniform vec3 uLightPosition[numLights];
+    uniform vec3 uKa;
+    uniform vec3 uKd;
+    uniform vec3 uKs;
+    uniform float uNs;
+    uniform float uD;
+    uniform int uIllum;
+    uniform bool uWireframe;
+
+    in vec3 vNormal;
+    in vec3 vLightRay[numLights];
+    in vec3 vEye[numLights];
+
+    out vec4 fragColor;
+
+    void main(void) {
+      if (uWireframe || uIllum == 0) {
+        fragColor = vec4(uKd, uD);
+        return;
+      }
+
+      vec3 color = vec3(0.0);
+      vec3 light = vec3(0.0);
+      vec3 eye = vec3(0.0);
+      vec3 reflection = vec3(0.0);
+      vec3 normal = normalize(vNormal);
+
+      if (uIllum == 1) {
+        for (int i = 0; i < numLights; i++) {
+          light = normalize(vLightRay[i]);
+          normal = normalize(vNormal);
+          color += (uLd[i] * uKd * clamp(dot(normal, -light), 0.0, 1.0));
+        }
+      }
+
+      if (uIllum == 2) {
+        for (int i = 0; i < numLights; i++) {
+          eye = normalize(vEye[i]);
+          light = normalize(vLightRay[i]);
+          reflection = reflect(light, normal);
+          color += (uLd[i] * uKd * clamp(dot(normal, -light), 0.0, 1.0));
+          color += (uLs[i] * uKs * pow(max(dot(reflection, eye), 0.0), uNs) * 4.0);
+        }
+      }
+
+      fragColor =  vec4(color, uD);
+    }
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    // Global variables to be used across application
+    let gl, program, scene, clock, camera, transforms, lights,
+      floor, selectedCar, lightPositions, carModelData,
+      clearColor = [0.9, 0.9, 0.9];
+
+    // Configure application
+    function configure() {
+      // Configure `canvas`
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      // Configure `gl`
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(...clearColor, 1);
+      gl.clearDepth(1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LESS);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      // Configure `program`
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexColor'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uLightPosition',
+        'uWireframe',
+        'uLd',
+        'uLs',
+        'uKa',
+        'uKd',
+        'uKs',
+        'uNs',
+        'uD',
+        'uIllum'
+      ];
+
+      // Load attributes and uniforms into program
+      program.load(attributes, uniforms);
+
+      // Configure `scene` and `clock`
+      scene = new Scene(gl, program);
+      clock = new Clock();
+
+      // Configure `camera` and `controls`
+      camera = new Camera(Camera.ORBITING_TYPE);
+      new Controls(camera, canvas);
+
+      // Configure `transforms`
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      // Configure `lights`
+      lights = new LightsManager();
+
+      // Light positions for each individual light in the scene
+      lightPositions = {
+        farLeft: [-1000, 1000, -1000],
+        farRight: [1000, 1000, -1000],
+        nearLeft: [-1000, 1000, 1000],
+        nearRight: [1000, 1000, 1000]
+      };
+
+      // Iterate over each light and configure
+      Object.keys(lightPositions).forEach(key => {
+        const light = new Light(key);
+        light.setPosition(lightPositions[key]);
+        light.setDiffuse([0.4, 0.4, 0.4]);
+        light.setSpecular([0.8, 0.8, 0.8]);
+        lights.add(light)
+      });
+
+      gl.uniform3fv(program.uLightPosition, lights.getArray('position'));
+      gl.uniform3fv(program.uLd, lights.getArray('diffuse'));
+      gl.uniform3fv(program.uLs, lights.getArray('specular'));
+
+      gl.uniform3fv(program.uKa, [1, 1, 1]);
+      gl.uniform3fv(program.uKd, [1, 1, 1]);
+      gl.uniform3fv(program.uKs, [1, 1, 1]);
+      gl.uniform1f(program.uNs, 1);
+
+      // Configure `floor`
+      floor = new Floor(200, 2);
+
+      // Describe the data for each car model
+      carModelData = {
+        'BMW i8': {
+          // This is the alias that's used to determine whether the item being
+          // loaded is a body panel with paint. Each object within the model has particular
+          // aliases that were set by the 3D artists.
+          paintAlias: 'BMW',
+          // This is the number of parts to load for this particular model
+          partsCount: 25,
+          // The path to the model
+          path: '/common/models/bmw-i8/part'
+        }
+      };
+    }
+
+    // Position `camera` back to home
+    function goHome() {
+      camera.goHome([0, 0.5, 5]);
+      camera.setFocus([0, 0, 0]);
+      camera.setAzimuth(25);
+      camera.setElevation(-10);
+    }
+
+    // Load the car into our scene
+    function loadCar(model) {
+      scene.objects = [];
+      scene.add(floor);
+      const { path, partsCount } = carModelData[model];
+      scene.loadByParts(path, partsCount);
+      selectedCar = model;
+    }
+
+    function load() {
+      goHome();
+      loadCar('BMW i8');
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        // Iterate over every object in the scene
+        scene.traverse(object => {
+          // If object is not visisble, then no need to render anything
+          if (!object.visible) return;
+
+          // Apply transformations
+          transforms.calculateModelView();
+          transforms.push();
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          // Set uniforms
+          gl.uniform3fv(program.uKa, object.Ka);
+          gl.uniform3fv(program.uKd, object.Kd);
+          gl.uniform3fv(program.uKs, object.Ks);
+          gl.uniform1f(program.uNs, object.Ns);
+          gl.uniform1f(program.uD, object.d);
+          gl.uniform1i(program.uIllum, object.illum);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          if (object.wireframe) {
+            gl.uniform1i(program.uWireframe, 1);
+            gl.drawElements(gl.LINES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+          else {
+            gl.uniform1i(program.uWireframe, 0);
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', draw);
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      utils.configureControls({
+        Car: {
+          Color: {
+            value: [255, 255, 255],
+            onChange: v => {
+              const color = utils.normalizeColor(v);
+              eachCarPanel(item => item.Kd = color);
+            }
+          },
+          Shininess: {
+            value: 0.5,
+            min: 0, max: 50, step: 0.1,
+            onChange: v => {
+              const shininess = [v, v, v];
+              eachCarPanel(item => item.Ks = shininess);
+            }
+          }
+        },
+        ...Object.keys(lightPositions).reduce((result, key) => {
+          const { Lights } = result;
+          const light = Lights[key] = {};
+          ['Diffuse', 'Specular'].forEach(property => {
+            light[property] = {
+              value: 0.5, min: 0, max: 1, step: 0.1,
+              onChange: v => {
+                const value = [v, v, v];
+                const light = lights.get(key);
+                switch (property) {
+                  case 'Diffuse':
+                    light.setDiffuse(value);
+                    gl.uniform3fv(program.uLd, lights.getArray('diffuse'));
+                    break;
+                  case 'Specular':
+                    light.setSpecular(value);
+                    gl.uniform3fv(program.uLs, lights.getArray('specular'));
+                    break;
+                }
+              }
+            }
+          });
+          return result;
+        }, { Lights: {} }),
+        Background: {
+          value: utils.denormalizeColor(clearColor),
+          onChange: v => gl.clearColor(...utils.normalizeColor(v), 1)
+        },
+        Floor: {
+          value: floor.visible,
+          onChange: v => floor.visible = v
+        },
+        'Go Home': goHome
+      });
+
+      function eachCarPanel(cb) {
+        const paintAlias = carModelData[selectedCar].paintAlias;
+        scene.traverse(item => {
+          if (~item.alias.indexOf(paintAlias)) {
+            cb(item);
+          }
+        });
+      }
+    }
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

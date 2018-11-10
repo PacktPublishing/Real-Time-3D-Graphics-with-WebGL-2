@@ -1,0 +1,337 @@
+<html>
+
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Light.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    const int numLights = 3;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec4 uMaterialDiffuse;
+    uniform vec3 uLightPosition[numLights];
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+    in vec4 aVertexColor;
+
+    out vec3 vNormal;
+    out vec3 vLightRay[numLights];
+
+    void main(void) {
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      vNormal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+
+      // Iterate for every light
+      for(int i = 0; i < numLights; i++) {
+        vec4 lightPosition = uModelViewMatrix * vec4(uLightPosition[i], 1.0);
+        vLightRay[i] = vertex.xyz - lightPosition.xyz;
+      }
+
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    const int numLights = 3;
+
+    uniform vec4 uMaterialAmbient;
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uWireframe;
+    uniform bool uLightSource;
+    uniform vec4 uLightAmbient;
+    uniform vec4 uLightDiffuse[numLights];
+    uniform float uCutOff;
+
+    in vec3 vNormal;
+    in vec3 vLightRay[numLights];
+    in vec4 vFinalColor;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      if (uWireframe || uLightSource){
+        fragColor = uMaterialDiffuse;
+      }
+      else {
+        vec4 Ia = uLightAmbient * uMaterialAmbient;
+        // Base color
+        vec4 finalColor = vec4(0.0, 0.0, 0.0, 1.0);
+
+        vec3 N = normalize(vNormal);
+        vec3 L = vec3(0.0);
+        float lambertTerm = 0.0;
+
+        // Iterate for every light
+        for(int i = 0; i < numLights; i++) {
+          L = normalize(vLightRay[i]);
+          lambertTerm = dot(N, -L);
+          if (lambertTerm > uCutOff) {
+            finalColor += uLightDiffuse[i] * uMaterialDiffuse * lambertTerm;
+          }
+        }
+
+    	  fragColor = vec4(vec3(finalColor += Ia), 1.0);
+      }
+    }
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    let gl, scene, program, camera, transforms, clock, lights,
+      lightCutOff = 0.5,
+      redLightPosition = [0, 7, 3],
+      greenLightPosition = [2.5, 3, 3],
+      blueLightPosition = [-2.5, 3, 3];
+
+    function configure() {
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.FUNC_ADD);
+      gl.depthFunc(gl.LEQUAL);
+
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexColor'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uLightAmbient',
+        'uLightDiffuse',
+        'uLightPosition',
+        'uWireframe',
+        'uLightSource',
+        'uCutOff'
+      ];
+
+      program.load(attributes, uniforms);
+
+      clock = new Clock();
+
+      scene = new Scene(gl, program);
+
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 5, 30]);
+      camera.setFocus([0, 0, 0]);
+      camera.setAzimuth(0);
+      camera.setElevation(-3);
+      new Controls(camera, canvas);
+
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      // Helper to manage multiple lights
+      lights = new LightsManager();
+
+      const redLight = new Light('redLight');
+      redLight.setPosition(redLightPosition);
+      redLight.setDiffuse([1, 0, 0, 1]);
+
+      const greenLight = new Light('greenLight');
+      greenLight.setPosition(greenLightPosition);
+      greenLight.setDiffuse([0, 1, 0, 1]);
+
+      const blueLight = new Light('blueLight');
+      blueLight.setPosition(blueLightPosition);
+      blueLight.setDiffuse([0, 0, 1, 1]);
+
+      lights.add(redLight);
+      lights.add(blueLight);
+      lights.add(greenLight);
+
+      gl.uniform3fv(program.uLightPosition, lights.getArray('position'));
+      gl.uniform4fv(program.uLightDiffuse, lights.getArray('diffuse'));
+
+      gl.uniform1f(program.uCutOff, lightCutOff);
+      gl.uniform4fv(program.uLightAmbient, [1, 1, 1, 1]);
+    }
+
+    function load() {
+      scene.add(new Floor(80, 2));
+      scene.load('/common/models/geometries/wall.json', 'wall');
+      scene.load('/common/models/geometries/sphere3.json', 'redLight');
+      scene.load('/common/models/geometries/sphere3.json', 'greenLight');
+      scene.load('/common/models/geometries/sphere3.json', 'blueLight');
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        scene.traverse(object => {
+          transforms.calculateModelView();
+          transforms.push();
+
+          gl.uniform1i(program.uLightSource, false);
+
+          const { alias } = object;
+          if (alias === 'redLight') {
+            const redLight = lights.get(alias);
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, redLight.position);
+            object.diffuse = redLight.diffuse;
+            gl.uniform1i(program.uLightSource, true);
+          }
+
+          if (alias === 'greenLight') {
+            const greenLight = lights.get(alias);
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, greenLight.position);
+            object.diffuse = greenLight.diffuse;
+            gl.uniform1i(program.uLightSource, true);
+          }
+
+          if (alias === 'blueLight') {
+            const blueLight = lights.get(alias);
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, blueLight.position);
+            object.diffuse = blueLight.diffuse;
+            gl.uniform1i(program.uLightSource, true);
+          }
+
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          // Set light positions
+          gl.uniform3fv(program.uLightPosition, lights.getArray('position'));
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+          gl.uniform1i(program.uWireframe, object.wireframe);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Draw
+          if (object.wireframe) {
+            gl.drawElements(gl.LINES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+          else {
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', draw);
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      utils.configureControls({
+        'Camera Type': {
+          value: camera.type,
+          options: [Camera.TRACKING_TYPE, Camera.ORBITING_TYPE],
+          onChange: v => {
+            camera.goHome();
+            camera.setType(v);
+          }
+        },
+        ...[
+          {
+            name: 'Red Light',
+            id: 'redLight',
+            position: redLightPosition
+          },
+          {
+            name: 'Green Light',
+            id: 'greenLight',
+            position: greenLightPosition
+          },
+          {
+            name: 'Blue Light',
+            id: 'blueLight',
+            position: blueLightPosition
+          },
+        ].reduce((controls, light) => {
+          const positionKeys = [
+            `X - ${light.name}`,
+            `Y - ${light.name}`,
+            `Z - ${light.name}`
+          ];
+          controls[light.name] = positionKeys.reduce((positionControls, position, i) => {
+            positionControls[position] = {
+              value: light.position[i],
+              min: -15, max: 15, step: 0.1,
+              onChange: (v, state) => {
+                lights.get(light.id).position = positionKeys.map(p => state[p]);
+              }
+            };
+            return positionControls;
+          }, {});
+          return controls;
+        }, {}),
+        'Light Cone Cut Off': {
+          value: lightCutOff,
+          min: 0, max: 1, step: 0.01,
+          onChange: v => gl.uniform1f(program.uCutOff, v)
+        },
+        'Go Home': () => {
+          camera.goHome();
+          camera.setType(Camera.ORBITING_TYPE);
+        }
+      });
+    }
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

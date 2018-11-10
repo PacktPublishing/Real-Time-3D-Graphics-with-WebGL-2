@@ -1,0 +1,456 @@
+<html>
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/EventEmitter.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Clock.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Light.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/PostProcess.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Texture.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec3 uLightPosition;
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uUseVertexColor;
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+    in vec4 aVertexColor;
+    in vec2 aVertexTextureCoords;
+
+    out vec3 vNormal;
+    out vec3 vLightRay;
+    out vec3 vEyeVector;
+    out vec4 vFinalColor;
+    out vec2 vTextureCoords;
+
+    void main(void) {
+      vec4 vertex = uModelViewMatrix * vec4(aVertexPosition, 1.0);
+      vec4 light = vec4(uLightPosition,1.0);
+
+      vFinalColor = aVertexColor;
+      vTextureCoords = aVertexTextureCoords;
+      vNormal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+      vLightRay = vertex.xyz-light.xyz;
+      vEyeVector = -vec3(vertex.xyz);
+
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aVertexPosition, 1.0);
+    }
+
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform vec4 uLightAmbient;
+    uniform vec4 uLightDiffuse;
+    uniform vec4 uMaterialAmbient;
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uOffscreen;
+    uniform sampler2D uSampler;
+
+    in vec3 vNormal;
+    in vec3 vLightRay;
+    in vec3 vEyeVector;
+    in vec4 vFinalColor;
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      if (uOffscreen) {
+        fragColor = uMaterialDiffuse;
+        return;
+      }
+
+      // Ambient
+      vec4 Ia = uLightAmbient * uMaterialAmbient;
+
+      // Diffuse
+      vec3 L = normalize(vLightRay);
+      vec3 N = normalize(vNormal);
+      float lambertTerm = max(dot(N, -L),0.33);
+      vec4 Id = uLightDiffuse * uMaterialDiffuse * lambertTerm;
+
+      // Specular
+      vec3 E = normalize(vEyeVector);
+      vec3 R = reflect(L, N);
+      float specular = pow( max(dot(R, E), 0.5), 50.0);
+      vec4 Is = vec4(0.5) * specular;
+
+      vec4 finalColor = Ia + Id + Is;
+
+      if (uMaterialDiffuse.a != 1.0) {
+        finalColor.a = uMaterialDiffuse.a;
+      }
+      else {
+        finalColor.a = 1.0;
+      }
+
+      fragColor =  finalColor * texture(uSampler, vec2(vTextureCoords.s, vTextureCoords.t));
+    }
+
+  </script>
+
+  <script id="post-/common-vs" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    in vec2 aVertexPosition;
+    in vec2 aVertexTextureCoords;
+
+    out vec2 vTextureCoords;
+
+    void main(void) {
+      vTextureCoords = aVertexTextureCoords;
+      gl_Position = vec4(aVertexPosition, 0.0, 1.0);
+    }
+
+  </script>
+
+  <script id="post-normal" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform sampler2D uSampler;
+
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      vec4 frameColor = texture(uSampler, vTextureCoords);
+      fragColor = frameColor;
+    }
+
+  </script>
+
+  <script id="post-greyscale" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform sampler2D uSampler;
+
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      vec4 frameColor = texture(uSampler, vTextureCoords);
+      float luminance = frameColor.r * 0.3 + frameColor.g * 0.59 + frameColor.b * 0.11;
+      fragColor = vec4(luminance, luminance, luminance, frameColor.a);
+    }
+
+  </script>
+
+  <script id="post-invert" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform sampler2D uSampler;
+
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      vec4 frameColor = texture(uSampler, vTextureCoords);
+      fragColor = vec4(vec3(1.0) - frameColor.rgb, frameColor.a);
+    }
+
+  </script>
+
+  <script id="post-wavy" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    const float speed = 15.0;
+    const float magnitude = 0.015;
+
+    uniform sampler2D uSampler;
+    uniform float uTime;
+
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      vec2 wavyCoord;
+      wavyCoord.s = vTextureCoords.s + sin(uTime + vTextureCoords.t * speed) * magnitude;
+      wavyCoord.t = vTextureCoords.t + cos(uTime + vTextureCoords.s * speed) * magnitude;
+      fragColor = texture(uSampler, wavyCoord);
+    }
+
+  </script>
+
+  <script id="post-blur" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform sampler2D uSampler;
+    uniform vec2 uInverseTextureSize;
+
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    vec4 offsetLookup(float xOff, float yOff) {
+      return texture(
+        uSampler,
+        vec2(
+          vTextureCoords.x + xOff * uInverseTextureSize.x,
+          vTextureCoords.y + yOff * uInverseTextureSize.y
+        )
+      );
+    }
+
+    void main(void) {
+      vec4 frameColor = offsetLookup(-4.0, 0.0) * 0.05;
+      frameColor += offsetLookup(-3.0, 0.0) * 0.09;
+      frameColor += offsetLookup(-2.0, 0.0) * 0.12;
+      frameColor += offsetLookup(-1.0, 0.0) * 0.15;
+      frameColor += offsetLookup(0.0, 0.0) * 0.16;
+      frameColor += offsetLookup(1.0, 0.0) * 0.15;
+      frameColor += offsetLookup(2.0, 0.0) * 0.12;
+      frameColor += offsetLookup(3.0, 0.0) * 0.09;
+      frameColor += offsetLookup(4.0, 0.0) * 0.05;
+      fragColor = frameColor;
+    }
+
+  </script>
+
+  <script id="post-filmgrain" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    const float grainIntensity = 0.1;
+    const float scrollSpeed = 4000.0;
+
+    uniform sampler2D uSampler;
+    uniform sampler2D uNoiseSampler;
+    uniform vec2 uInverseTextureSize;
+    uniform float uTime;
+
+    in vec2 vTextureCoords;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      vec4 frameColor = texture(uSampler, vTextureCoords);
+      vec4 grain = texture(
+        uNoiseSampler,
+        vTextureCoords * 2.0 + uTime * scrollSpeed * uInverseTextureSize
+      );
+      fragColor = frameColor - (grain * grainIntensity);
+    }
+  </script>
+
+  <script id='code-js' type="text/javascript">
+    'use strict';
+
+    let gl, scene, camera,clock, program, transforms, post, noiseTexture;
+
+    function configure() {
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(100);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LESS);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexColor',
+        'aVertexTextureCoords'
+      ];
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uLightAmbient',
+        'uLightDiffuse',
+        'uLightPosition',
+        'uAlpha',
+        'uUseVertexColor',
+        'uOffscreen',
+        'uSampler'
+      ];
+
+      program.load(attributes, uniforms);
+
+      clock = new Clock();
+      scene = new Scene(gl, program);
+
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 0, 25]);
+      camera.setFocus([0, 0, 0]);
+      camera.setElevation(-40);
+      camera.setAzimuth(-30);
+
+      new Controls(camera, canvas);
+
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      gl.uniform3fv(program.uLightPosition, [0, 5, 20]);
+      gl.uniform4fv(program.uLightAmbient, [1, 1, 1, 1]);
+      gl.uniform4fv(program.uLightDiffuse, [1, 1, 1, 1]);
+      gl.uniform1f(program.uAlpha, 1);
+
+      post = new PostProcess(canvas, 'post-/common-vs', 'post-normal');
+
+      noiseTexture = new Texture(gl);
+      noiseTexture.setImage('/common/images/noise.png');
+    }
+
+    function load() {
+      scene.load('/common/models/geometries/cube-texture.json', 'cube', {
+        position: [0, 0, 0],
+        scale: [6, 6, 6]
+      });
+    }
+
+    function render() {
+      // Checks to see if the framebuffer needs to be re-sized to match the canvas
+      post.validateSize();
+
+      // Render scene to framebuffer
+      gl.bindFramebuffer(gl.FRAMEBUFFER, post.framebuffer);
+      draw();
+
+      // Set up the post-process effect for rendering
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      post.bind();
+
+      // Do any additional post-process shader uniform setup here
+      if (post.uniform.uNoiseSampler) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, noiseTexture.glTexture);
+        gl.uniform1i(post.uniform.uNoiseSampler, 1);
+      }
+
+      // Re-render scene from framebuffer with post process effect
+      post.draw();
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        program.useProgram();
+        const offscreen = program.getUniform(program.uOffscreen);
+
+        scene.traverse(object => {
+          transforms.calculateModelView();
+          transforms.push();
+
+          if (object.alias !== 'floor') {
+            mat4.translate(transforms.modelViewMatrix, transforms.modelViewMatrix, object.position);
+            mat4.scale(transforms.modelViewMatrix, transforms.modelViewMatrix, object.scale);
+          }
+
+          transforms.setMatrixUniforms();
+          transforms.pop();
+
+          if (object.diffuse[3] < 1 && !offscreen) {
+            gl.disable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+          }
+          else {
+            gl.enable(gl.DEPTH_TEST);
+            gl.disable(gl.BLEND);
+          }
+
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+          gl.uniform1i(program.uUseVertexColor, false);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Activate texture
+          if (object.textureCoords) {
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, object.texture.glTexture);
+            gl.uniform1i(program.uSampler, 0);
+          }
+
+          // Draw
+          gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function init() {
+      configure();
+      load();
+      clock.on('tick', render);
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      const options = ['Normal', 'Greyscale', 'Invert', 'Wavy', 'Blur', 'Film Grain'];
+      utils.configureControls({
+        Filters: {
+          value: options[0],
+          options,
+          onChange: v => {
+            const effect = v.replace(' ', '').toLowerCase();
+            post.configureShader('post-/common-vs', `post-${effect}`);
+          }
+        }
+      });
+    }
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>

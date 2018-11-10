@@ -1,0 +1,391 @@
+<html>
+
+<head>
+  <title>Real-Time 3D Graphics with WebGL2</title>
+  <link rel="shortcut icon" type="image/png" href="/common/images/favicon.png" />
+
+  <!-- libraries -->
+  <link rel="stylesheet" href="/common/lib/normalize.css">
+  <script type="text/javascript" src="/common/lib/dat.gui.js"></script>
+  <script type="text/javascript" src="/common/lib/gl-matrix.js"></script>
+
+  <!-- modules -->
+  <script type="text/javascript" src="/common/js/utils.js"></script>
+  <script type="text/javascript" src="/common/js/Program.js"></script>
+  <script type="text/javascript" src="/common/js/Scene.js"></script>
+  <script type="text/javascript" src="/common/js/Axis.js"></script>
+  <script type="text/javascript" src="/common/js/Floor.js"></script>
+  <script type="text/javascript" src="/common/js/Camera.js"></script>
+  <script type="text/javascript" src="/common/js/Controls.js"></script>
+  <script type="text/javascript" src="/common/js/Transforms.js"></script>
+
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    #version 300 es
+    precision mediump float;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    uniform vec3 uLightPosition;
+    uniform vec4 uMaterialDiffuse;
+    uniform bool uWireframe;
+    uniform bool uUpdateLight;
+    uniform vec3 uTranslation;
+    uniform bool uTranslate;
+
+    in vec3 aVertexPosition;
+    in vec3 aVertexNormal;
+    in vec4 aVertexColor;
+
+    out vec3 vNormal;
+    out vec3 vLightRay;
+    out vec3 vEyeVector;
+    out vec4 vFinalColor;
+
+    void main(void) {
+      if (uWireframe) {
+        vFinalColor = uMaterialDiffuse;
+      }
+
+      // Transformed vertex position
+      vec3 vecPosition = aVertexPosition;
+      if (uTranslate) {
+        vecPosition += uTranslation;
+      }
+
+      vec4 vertex = uModelViewMatrix * vec4(vecPosition, 1.0);
+      vNormal = vec3(uNormalMatrix * vec4(aVertexNormal, 1.0));
+      vec4 light = vec4(uLightPosition,1.0);
+
+      if (uUpdateLight) {
+        light = uModelViewMatrix * vec4(uLightPosition,1.0);
+      }
+
+      vLightRay = vertex.xyz - light.xyz;
+      vEyeVector = -vec3(vertex.xyz);
+      gl_Position = uProjectionMatrix * vertex;
+    }
+  </script>
+
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    #version 300 es
+    precision mediump float;
+
+    uniform bool uWireframe;
+    uniform vec4 uLightAmbient;
+    uniform vec4 uLightDiffuse;
+    uniform vec4 uLightSpecular;
+    uniform vec4 uMaterialAmbient;
+    uniform vec4 uMaterialDiffuse;
+    uniform vec4 uMaterialSpecular;
+    uniform float uShininess;
+
+    in vec3 vNormal;
+    in vec3 vLightRay;
+    in vec3 vEyeVector;
+    in vec4 vFinalColor;
+
+    out vec4 fragColor;
+
+    void main(void) {
+      if (uWireframe) {
+        fragColor = vFinalColor;
+      }
+      else {
+        vec3 L = normalize(vLightRay);
+        vec3 N = normalize(vNormal);
+
+        float lambertTerm = dot(N, -L);
+        // Ambient
+        vec4 Ia = uLightAmbient * uMaterialAmbient;
+        // Diffuse
+        vec4 Id = vec4(0.0, 0.0, 0.0, 1.0);
+        // Specular
+        vec4 Is = vec4(0.0, 0.0, 0.0, 1.0);
+
+        if (lambertTerm > 0.0) {
+          Id = uLightDiffuse * uMaterialDiffuse * lambertTerm;
+          vec3 E = normalize(vEyeVector);
+          vec3 R = reflect(L, N);
+          float specular = pow( max(dot(R, E), 0.0), uShininess);
+          Is = uLightSpecular * uMaterialSpecular * specular;
+        }
+
+        fragColor = vec4(vec3(Ia + Id + Is), 1.0);
+      }
+    }
+  </script>
+
+  <script type="text/javascript">
+    'use strict';
+
+    let
+      gl, scene, program, camera, transforms,
+      elapsedTime, initialTime,
+      fixedLight = false,
+      balls = [],
+      sceneTime = 0,
+      animationRate = 15,
+      gravity = 9.8,
+      ballsCount = 500;
+
+    // Helper class to encapsulate the the bouncing ball behavior.
+    class BouncingBall {
+
+      constructor() {
+        this.position = generatePosition();
+
+        this.H0 = this.position[1];
+        this.V0 = 0;
+        this.VF = Math.sqrt(2 * gravity * this.H0);
+        this.HF = 0;
+
+        this.bouncingTime = 0;
+        this.BOUNCINESS = (Math.random() + 0.5);
+
+        this.color = [Math.random(), Math.random(), Math.random(), 1];
+      }
+
+      update(time) {
+        const t = time - this.bouncingTime;
+        const h = this.H0 + (this.V0 * t) - (0.5 * gravity * t * t);
+
+        if (h <= 0) {
+          this.bouncingTime = time;
+          this.V0 = this.VF * this.BOUNCINESS;
+          this.HF = (this.V0 * this.V0) / (2 * gravity);
+          this.VF = Math.sqrt(2 * gravity * this.HF);
+          this.H0 = 0;
+        }
+        else {
+          this.position[1] = h;
+        }
+      }
+
+    }
+
+    // Generate a random position
+    function generatePosition() {
+      return [
+        Math.floor(Math.random() * 50) - Math.floor(Math.random() * 50),
+        Math.floor(Math.random() * 30) + 50,
+        Math.floor(Math.random() * 50)
+      ];
+    }
+
+    function configure() {
+      // Configure `canvas`
+      const canvas = utils.getCanvas('webgl-canvas');
+      utils.autoResizeCanvas(canvas);
+
+      // Configure `gl`
+      gl = utils.getGLContext(canvas);
+      gl.clearColor(0.9, 0.9, 0.9, 1);
+      gl.clearDepth(100);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+
+      // Configure `program`
+      program = new Program(gl, 'vertex-shader', 'fragment-shader');
+
+      const uniforms = [
+        'uProjectionMatrix',
+        'uModelViewMatrix',
+        'uNormalMatrix',
+        'uMaterialDiffuse',
+        'uMaterialAmbient',
+        'uMaterialSpecular',
+        'uLightAmbient',
+        'uLightDiffuse',
+        'uLightSpecular',
+        'uLightPosition',
+        'uShininess',
+        'uUpdateLight',
+        'uWireframe',
+        'uPerVertexColor',
+        'uTranslation',
+        'uTranslate'
+      ];
+
+      const attributes = [
+        'aVertexPosition',
+        'aVertexNormal',
+        'aVertexColor',
+      ];
+
+      // Load attributes and uniforms
+      program.load(attributes, uniforms);
+
+      // Configure `scene`
+      scene = new Scene(gl, program);
+
+      // Configure `camera` and `controls`
+      camera = new Camera(Camera.ORBITING_TYPE);
+      camera.goHome([0, 2, 70]);
+      camera.setFocus([0, 0, 0]);
+      new Controls(camera, canvas);
+
+      // Configure `transforms`
+      transforms = new Transforms(gl, program, camera, canvas);
+
+      // Set uniforms
+      gl.uniform3fv(program.uLightPosition, [0, 120, 120]);
+      gl.uniform4fv(program.uLightAmbient, [0.2, 0.2, 0.2, 1]);
+      gl.uniform4fv(program.uLightDiffuse, [1, 1, 1, 1]);
+      gl.uniform4fv(program.uLightSpecular, [1, 1, 1, 1]);
+      gl.uniform1f(program.uShininess, 230);
+
+      // Create program variable that maps the uniform uTranslation
+      gl.uniform3fv(program.uTranslation, [0, 0, 0]);
+
+      // Create program variable that maps the uniform uTranslate
+      gl.uniform1i(program.uTranslate, false);
+
+      for (let i = 0; i < ballsCount; i++) {
+        balls.push(new BouncingBall(...generatePosition()));
+      }
+    }
+
+    function load() {
+      scene.add(new Floor(80, 2));
+      scene.add(new Axis(82));
+      // We use the same geometry for every ball
+      scene.load('/common/models/geometries/ball.json', 'ball');
+    }
+
+    function drawBall(ball, sphere) {
+      gl.uniform3fv(program.uTranslation, ball.position);
+      gl.uniform4fv(program.uMaterialDiffuse, ball.color);
+      gl.drawElements(gl.TRIANGLES, sphere.indices.length, gl.UNSIGNED_SHORT, 0);
+    }
+
+    function drawBalls(object) {
+      gl.uniform4fv(program.uMaterialSpecular, object.specular);
+      gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+      gl.uniform1i(program.uWireframe, false);
+      gl.uniform1i(program.uTranslate, true);
+
+      // Bind
+      gl.bindVertexArray(object.vao);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+      // Iterate over `balls` array and draw each one
+      balls.forEach(ball => drawBall(ball, object));
+
+      // Clean
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      transforms.updatePerspective();
+
+      try {
+        gl.uniform1i(program.uUpdateLight, fixedLight);
+
+        // Iterate over every object in the scene
+        scene.traverse(object => {
+          transforms.calculateModelView();
+          transforms.setMatrixUniforms();
+
+          // If the object is a `ball`, then return with
+          // the optimized draw commands
+          if (object.alias === 'ball') {
+            return drawBalls(object);
+          }
+
+          // Set uniforms
+          gl.uniform1i(program.uTranslate, false);
+          gl.uniform4fv(program.uMaterialDiffuse, object.diffuse);
+          gl.uniform4fv(program.uMaterialSpecular, object.specular);
+          gl.uniform4fv(program.uMaterialAmbient, object.ambient);
+          gl.uniform1i(program.uWireframe, object.wireframe);
+
+          // Bind
+          gl.bindVertexArray(object.vao);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.ibo);
+
+          // Draw
+          if (object.wireframe) {
+            gl.drawElements(gl.LINES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+          else {
+            gl.drawElements(gl.TRIANGLES, object.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+
+          // Clean
+          gl.bindVertexArray(null);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+        });
+      }
+      catch (error) {
+        console.error(error);
+      }
+    }
+
+    function animate() {
+      balls.forEach(ball => ball.update(sceneTime));
+      sceneTime += 33 / 1000;
+      draw();
+    }
+
+    function onFrame() {
+      elapsedTime = (new Date).getTime() - initialTime;
+      if (elapsedTime < animationRate) return;
+
+      let steps = Math.floor(elapsedTime / animationRate);
+      while (steps > 0) {
+        animate();
+        steps -= 1;
+      }
+
+      initialTime = (new Date).getTime();
+    }
+
+    function render() {
+      initialTime = (new Date).getTime();
+      setInterval(onFrame, animationRate / 1000);
+    }
+
+    function init() {
+      configure();
+      load();
+      render();
+
+      initControls();
+    }
+
+    window.onload = init;
+
+    function initControls() {
+      utils.configureControls({
+        'Camera Type': {
+          value: camera.type,
+          options: [Camera.ORBITING_TYPE, Camera.TRACKING_TYPE],
+          onChange: v => {
+            camera.goHome();
+            camera.setType(v);
+          }
+        },
+        'Static Light Position': {
+          value: fixedLight,
+          onChange: v => fixedLight = v
+        },
+        'Go Home': () => camera.goHome()
+      });
+    }
+  </script>
+</head>
+
+<body>
+
+  <canvas id="webgl-canvas">
+    Your browser does not support the HTML5 canvas element.
+  </canvas>
+
+</body>
+</html>
