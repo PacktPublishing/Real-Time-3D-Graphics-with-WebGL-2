@@ -161,15 +161,11 @@
       // Bind the VAO
       gl.bindVertexArray(squareVAO);
 
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, squareIndexBuffer);
-
       // Draw to the scene using triangle primitives
       gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
 
       // Clean
       gl.bindVertexArray(null);
-      gl.bindBuffer(gl.ARRAY_BUFFER, null);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
     }
 
     // Entry point to our application
