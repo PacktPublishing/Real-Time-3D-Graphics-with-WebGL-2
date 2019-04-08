@@ -183,11 +183,12 @@
       mat4.identity(modelViewMatrix);
       mat4.translate(modelViewMatrix, modelViewMatrix, [0, 0, -1.5]);
 
+      // New operation for rotating the Model-View matrix
+      mat4.rotate(modelViewMatrix, modelViewMatrix, angle * Math.PI / 180, [0, 1, 0]);
+
       mat4.copy(normalMatrix, modelViewMatrix);
       mat4.invert(normalMatrix, normalMatrix);
       mat4.transpose(normalMatrix, normalMatrix);
-      // New operation for rotating the Model-View matrix
-      mat4.rotate(modelViewMatrix, modelViewMatrix, angle * Math.PI / 180, [0, 1, 0]);
 
       gl.uniformMatrix4fv(program.uModelViewMatrix, false, modelViewMatrix);
       gl.uniformMatrix4fv(program.uProjectionMatrix, false, projectionMatrix);
@@ -197,7 +198,6 @@
       try {
         // Bind
         gl.bindVertexArray(sphereVAO);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIndicesBuffer);
 
         // Draw
         gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);

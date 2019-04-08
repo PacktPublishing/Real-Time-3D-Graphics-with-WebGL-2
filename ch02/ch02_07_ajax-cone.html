@@ -132,8 +132,7 @@
 
         // Clean
         gl.bindVertexArray(null);
-        gl.bindBuffer(gl.ARRAY_BUFFER, null);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
       })
       // Display into the console if there are any errors
       .catch(console.error);
@@ -153,15 +152,12 @@
 
       // Bind
       gl.bindVertexArray(coneVAO);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, modelIndexBuffer);
 
       // Draw
       gl.drawElements(gl.TRIANGLES, model.indices.length, gl.UNSIGNED_SHORT, 0);
 
       // Clean
       gl.bindVertexArray(null);
-      gl.bindBuffer(gl.ARRAY_BUFFER, null);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
     }
 
     // Although we don't necessarily need to call `draw` on every

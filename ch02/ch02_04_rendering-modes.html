@@ -130,8 +130,6 @@
       // Bind VAO
       gl.bindVertexArray(trapezoidVAO);
 
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trapezoidIndexBuffer);
-
       // Depending on the rendering mode type, we will draw differently
       switch (renderingMode) {
         case 'TRIANGLES': {
@@ -180,8 +178,6 @@
 
       // Clean
       gl.bindVertexArray(null);
-      gl.bindBuffer(gl.ARRAY_BUFFER, null);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
     }
 
     function render() {

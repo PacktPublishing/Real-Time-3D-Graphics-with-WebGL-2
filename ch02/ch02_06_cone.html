@@ -142,8 +142,6 @@
 
       // Clean
       gl.bindVertexArray(null);
-      gl.bindBuffer(gl.ARRAY_BUFFER, null);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
     }
 
     function draw() {
@@ -160,14 +158,11 @@
 
       // Bind
       gl.bindVertexArray(coneVAO);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, coneIndexBuffer);
 
       gl.drawElements(gl.LINE_LOOP, indices.length, gl.UNSIGNED_SHORT, 0);
 
       // Clean
       gl.bindVertexArray(null);
-      gl.bindBuffer(gl.ARRAY_BUFFER, null);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
     }
 
     // Although we don't necessarily need to call `draw` on every
