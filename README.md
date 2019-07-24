@@ -1,8 +1,8 @@
-# Real-Time 3D Graphics with WebGL 2
+# Real-Time 3D Graphics with WebGL 2 - Second Edition
 
-<a href="https://www.amazon.com/Real-Time-Graphics-WebGL-interactive-applications-ebook/dp/B07GVNQLH5/ref=sr_1_1?ie=UTF8&qid=1541780051&sr=8-1&keywords=webgl+2"><img src="https://www.packtpub.com/sites/default/files/B09878_New_ccover.png" alt="Real-Time 3D Graphics with WebGL 2" height="256px" align="right"></a>
+<a href="https://www.packtpub.com/web-development/real-time-3d-graphics-webgl-2-second-edition"><img src="https://www.packtpub.com/media/catalog/product/cache/e4d64343b1bc593f1c5348fe05efa4a6/b/0/b09878_new_ccover.png" alt="Real-Time 3D Graphics with WebGL 2 - Second Edition" height="256px" align="right"></a>
 
-This is the code repository for [Real-Time 3D Graphics with WebGL 2](https://www.amazon.com/Real-Time-Graphics-WebGL-interactive-applications-ebook/dp/B07GVNQLH5/ref=sr_1_1?ie=UTF8&qid=1541780051&sr=8-1&keywords=webgl+2), published by Packt.
+This is the code repository for [Real-Time 3D Graphics with WebGL 2 - Second Edition](https://www.packtpub.com/web-development/real-time-3d-graphics-webgl-2-second-edition), published by Packt.
 
 **Build Interactive 3D Applications with JavaScript and WebGL 2 (OpenGL ES 3.0)**
 
@@ -42,6 +42,7 @@ The code will look like the following:
 ```
 
 **Following Is What You Need for This Book:**
+This book is intended for developers who are interested in building highly interactive 3D applications for the web. A basic understanding of JavaScript is necessary; no prior computer graphics or WebGL knowledge is required.
 
 With the following software and hardware list, you can run all code files present in the book.
 
