@@ -66,6 +66,8 @@ If you do not have a web server, we recommend you install a lightweight web serv
 
 To run the examples locally on your machine, run your server from the root of the directory, since the `common` directory is a shared dependency across chapters.
 
+## Errata
+* Page 447: **Babylon.js (https://github.com/mrdoob/three.js)** _should be_ **Babylon.js (https://github.com/BabylonJS/Babylon.js)**
 
 ### Related Products <Other books you may enjoy>
 - Mastering SVG [[Packt]](https://www.packtpub.com/web-development/mastering-svg?utm_source=github&utm_medium=repository&utm_campaign=9781788626743) [[Amazon]](https://www.amazon.com/dp/1788626745)
