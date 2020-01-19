@@ -107,7 +107,7 @@
         }
 
         if (lambertTermThree > uCutOff) {
-          Id3 = uDiffuseBlueLight * uMaterialDiffuse * lambertTermTwo;
+          Id3 = uDiffuseBlueLight * uMaterialDiffuse * lambertTermThree;
         }
 
         fragColor = vec4(vec3(Ia + Id1 + Id2 + Id3), 1.0);
