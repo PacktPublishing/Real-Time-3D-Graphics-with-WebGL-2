@@ -351,10 +351,10 @@
       post.bind();
 
       // Do any additional post-process shader uniform setup here
-      if (post.uniform.uNoiseSampler) {
+      if (post.uniforms.uNoiseSampler) {
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, noiseTexture.glTexture);
-        gl.uniform1i(post.uniform.uNoiseSampler, 1);
+        gl.uniform1i(post.uniforms.uNoiseSampler, 1);
       }
 
       // Re-render scene from framebuffer with post process effect
