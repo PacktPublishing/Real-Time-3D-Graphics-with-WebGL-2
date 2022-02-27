@@ -10,7 +10,10 @@
   </style>
 
   <script type="text/javascript">
-    // Enforcing all JS to be executed in "strict mode"
+    {{/* JavaScript で暗黙に失敗する一部のものを、エラーが発生するように変更することで除去します。
+    JavaScript エンジンによる最適化処理を困難にする誤りを修正します。厳格モードのコードは、非厳格モードのコードより高速に実行できる可能性があります。
+    将来の ECMAScript で定義される予定の構文の使用を禁止します。
+    https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Strict_mode */}}
     'use strict';
 
     function init() {

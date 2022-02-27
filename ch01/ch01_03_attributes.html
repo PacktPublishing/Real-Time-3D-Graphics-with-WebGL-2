@@ -19,9 +19,9 @@
     function updateClearColor(...color) {
       // The ES6 spread operator (...) allows for us to
       // use elements of an array as arguments to a function
-      gl.clearColor(...color);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.viewport(0, 0, 0, 0);
+      gl.clearColor(...color); // gl.clear() を読んだ際に使われる color を設定
+      gl.clear(gl.COLOR_BUFFER_BIT); // Buffer を事前設定された color でクリア
+      gl.viewport(0, 0, 10, 10); // canvas 左下を (0, 0) とし, WebGL 描画領域の原点(x, y) と (width, height) を定義
     }
 
     function checkKey(event) {
@@ -43,7 +43,9 @@
         }
         // number 4 => get color
         case 52: {
-          const color = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+          // https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/getParameter
+
+          const color = gl.getParameter(gl.COLOR_CLEAR_VALUE); // returns Float32Array
           // Don't let the following line confuse you.
           // It basically rounds up the numbers to one
           // decimal cipher for visualization purposes.
@@ -52,7 +54,7 @@
           // from 0 to 1 you can multiply these values by 255
           // to display in their RGB values.
           alert(`clearColor = (
-            ${color[0].toFixed(1)},
+            ${color[0].toFixed(1)}, // 小数点１桁まで表示
             ${color[1].toFixed(1)},
             ${color[2].toFixed(1)}
           )`);
@@ -72,11 +74,11 @@
 
       gl = canvas.getContext('webgl2');
 
-      const message = gl
+      {{/* const message = gl
         ? 'Hooray! You got a WebGL2 context'
         : 'Sorry! WebGL is not available';
 
-      alert(message);
+      alert(message); */}}
 
       // Call checkKey whenever a key is pressed
       window.onkeydown = checkKey;
