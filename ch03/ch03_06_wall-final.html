@@ -238,7 +238,7 @@
       gl.viewport(0, 0, width, height);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-      mat4.perspective(projectionMatrix, 45, width / height, 0.1, 10000);
+      mat4.perspective(projectionMatrix, 45 * (Math.PI / 180), width / height, 0.1, 10000);
       mat4.identity(modelViewMatrix);
       mat4.translate(modelViewMatrix, modelViewMatrix, [0, 0, -40]);
 
