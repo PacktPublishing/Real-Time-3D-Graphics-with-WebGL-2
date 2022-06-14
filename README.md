@@ -1,7 +1,3 @@
-## [Get this title for $10 on Packt's Spring Sale](https://www.packt.com/B09878?utm_source=github&utm_medium=packt-github-repo&utm_campaign=spring_10_dollar_2022)
------
-For a limited period, all eBooks and Videos are only $10. All the practical content you need \- by developers, for developers
-
 # Real-Time 3D Graphics with WebGL 2 - Second Edition
 
 <a href="https://www.packtpub.com/web-development/real-time-3d-graphics-webgl-2-second-edition"><img src="https://www.packtpub.com/media/catalog/product/cache/e4d64343b1bc593f1c5348fe05efa4a6/b/0/b09878_new_ccover.png" alt="Real-Time 3D Graphics with WebGL 2 - Second Edition" height="256px" align="right"></a>
