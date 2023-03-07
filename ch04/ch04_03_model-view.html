@@ -177,7 +177,7 @@
 
     // Update transforms
     function updateTransforms() {
-      mat4.perspective(projectionMatrix, 45, gl.canvas.width / gl.canvas.height, 0.1, 1000);
+      mat4.perspective(projectionMatrix, 45 * (Math.PI / 180), gl.canvas.width / gl.canvas.height, 0.1, 1000);
 
       if (coordinates === WORLD_COORDINATES) {
         mat4.identity(modelViewMatrix);

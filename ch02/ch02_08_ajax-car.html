@@ -149,7 +149,7 @@
       gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
       // We will cover these operations in later chapters
-      mat4.perspective(projectionMatrix, 45, gl.canvas.width / gl.canvas.height, 10, 10000);
+      mat4.perspective(projectionMatrix, 45 * (Math.PI / 180), gl.canvas.width / gl.canvas.height, 10, 10000);
       mat4.identity(modelViewMatrix);
       mat4.translate(modelViewMatrix, modelViewMatrix, [-10, 0, -100]);
       mat4.rotate(modelViewMatrix, modelViewMatrix, 30 * Math.PI / 180, [1, 0, 0]);

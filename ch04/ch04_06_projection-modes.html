@@ -194,7 +194,7 @@
     function updateTransforms() {
       const { width, height } = gl.canvas;
       if (projectionMode === PERSPECTIVE_PROJECTION) {
-        mat4.perspective(projectionMatrix, fov, width / height, 1, 5000);
+        mat4.perspective(projectionMatrix, fov * (Math.PI / 180), width / height, 1, 5000);
       }
       else {
         mat4.ortho(projectionMatrix, -width / fov, width / fov, -height / fov, height / fov, -5000, 5000);
